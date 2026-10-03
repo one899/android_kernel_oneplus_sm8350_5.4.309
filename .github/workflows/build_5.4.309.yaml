@@ -149,6 +149,32 @@ jobs:
           echo "===================== make 退出码: $RC ====================="
           exit $RC
 
+      - name: Strip modules
+        run: |
+          set -e
+          export PATH="$(pwd)/compiler/clang-bin/bin:$PATH"
+          WK=$(find kernel/msm-5.4/out -name 'wlan.ko' | head -1)
+          if [ -z "$WK" ]; then
+            echo 'FAIL: 没找到 wlan.ko'
+            find kernel/msm-5.4/out -name '*.ko' | head -30
+            exit 1
+          fi
+          echo "找到: $WK"
+          ls -lh "$WK"
+          echo '=== 剥离调试信息 ==='
+          if command -v llvm-strip >/dev/null 2>&1; then STRIP=llvm-strip; else STRIP=strip; fi
+          echo "用: $STRIP"
+          cp "$WK" qca_cld3_wlan.ko
+          $STRIP --strip-debug qca_cld3_wlan.ko
+          ls -lh qca_cld3_wlan.ko
+          echo '=== vermagic 检查 ==='
+          strings qca_cld3_wlan.ko | grep -m1 vermagic
+          echo '=== 模块信息 ==='
+          strings qca_cld3_wlan.ko | grep -m1 '^name=' || true
+          echo '=== 同时 strip out 里所有 .ko (给 AK3 用) ==='
+          find kernel/msm-5.4/out -name '*.ko' -exec $STRIP --strip-debug {} \; 2>/dev/null || true
+          echo "strip 后 .ko 总大小: $(du -sh kernel/msm-5.4/out --exclude='*.o' 2>/dev/null | cut -f1)"
+
       - name: Package with AnyKernel3
         run: |
           set -e
@@ -186,24 +212,6 @@ jobs:
           ./magiskboot repack boot_origin.img ../boot-9RT-Kernel-5.4.309-Docker.img
           cd ..
           ls -lh boot-*.img
-
-      - name: Collect wlan.ko
-        run: |
-          set -e
-          echo '=== 找 wlan.ko ==='
-          find kernel/msm-5.4/out -name 'wlan.ko' -o -name '*wlan*.ko' | head -20
-          WK=$(find kernel/msm-5.4/out -name 'wlan.ko' | head -1)
-          if [ -z "$WK" ]; then
-            echo 'FAIL: 没找到 wlan.ko'
-            echo '--- out 里所有 .ko ---'
-            find kernel/msm-5.4/out -name '*.ko' | head -30
-            exit 1
-          fi
-          echo "找到: $WK"
-          cp "$WK" qca_cld3_wlan.ko
-          ls -lh qca_cld3_wlan.ko
-          echo '=== vermagic 检查 ==='
-          strings qca_cld3_wlan.ko | grep -m1 vermagic
 
       - name: Check Result
         run: |
