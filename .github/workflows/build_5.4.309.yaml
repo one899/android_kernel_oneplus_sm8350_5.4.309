@@ -21,6 +21,22 @@ jobs:
           sudo apt-get install -y kmod cpio binutils cmake binutils-aarch64-linux-gnu git wget pahole automake flex lzop bison gperf build-essential zip curl zlib1g-dev libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen minicom bc libc6-dev-i386 libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip dwarves device-tree-compiler python3 ccache imagemagick libelf-dev libncurses5-dev libsdl1.2-dev gpart fuse2fs e2fsck-static rsync adb fastboot libstdc++6 python-is-python3 gcc-aarch64-linux-gnu
           mkdir -p kernel
 
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Setup ccache
+        run: |
+          echo '=== ccache 配置 ==='
+          ccache --version | head -1
+          ccache -M 5G
+          ccache -z
+          ccache -s
+
       - name: Checkout Kernel Source
         uses: actions/checkout@v6
         with:
@@ -127,7 +143,7 @@ jobs:
           echo '===== docker 补丁完成 ====='
           sed -i 's/obj-$(CONFIG_KPROBES)/obj-y/g' kernel/Makefile || true
           echo '===== 生成配置 ====='
-          make O=out CC=clang LLVM=1 9rt_defconfig
+          make O=out CC="ccache clang" LLVM=1 9rt_defconfig
           echo '===== 打开 QCA WLAN 驱动 ====='
           ./scripts/config --file out/.config -m CONFIG_QCA_CLD_WLAN
           ./scripts/config --file out/.config --set-str CONFIG_QCA_CLD_WLAN_PROFILE qca6390
@@ -147,9 +163,11 @@ jobs:
           echo '===== KSU 确认 ====='
           grep -E 'CONFIG_KSU' out/.config || echo '(无 KSU 配置 = 已关闭)'
           echo '===== 编译 ====='
-          make O=out CC=clang LLVM=1 -j$(nproc) 2>&1 | tee /tmp/build.log
+          make O=out CC="ccache clang" LLVM=1 -j$(nproc) 2>&1 | tee /tmp/build.log
           RC=${PIPESTATUS[0]}
           echo "===================== make 退出码: $RC ====================="
+          echo '=== ccache 统计 ==='
+          ccache -s | head -12
           exit $RC
 
       - name: Strip modules
