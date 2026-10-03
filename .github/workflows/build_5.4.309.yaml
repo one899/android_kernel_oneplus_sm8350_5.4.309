@@ -1,0 +1,109 @@
+name: Build Kernel 5.4.309 (KSU Disabled)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ martini-5.4.309 ]
+
+jobs:
+  build:
+    name: Compile Kernel
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Configure Fast APT Mirror
+        uses: vegardit/fast-apt-mirror.sh@v1
+
+      - name: Make Build Environment
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kmod cpio binutils cmake binutils-aarch64-linux-gnu git wget pahole automake flex lzop bison gperf build-essential zip curl zlib1g-dev libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen minicom bc libc6-dev-i386 libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip dwarves device-tree-compiler python3 ccache imagemagick libelf-dev libncurses5-dev libsdl1.2-dev gpart fuse2fs e2fsck-static rsync adb fastboot libstdc++6 python-is-python3 gcc-aarch64-linux-gnu
+          mkdir -p kernel
+
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v6
+        with:
+          repository: one899/android_kernel_oneplus_sm8350_5.4.309
+          path: kernel/msm-5.4
+          ref: martini-5.4.309
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Checkout Modules Source
+        uses: actions/checkout@v6
+        with:
+          repository: one899/android_kernel_modules_and_devicetree_oneplus_sm8350_5.4.309
+          path: temp_modules
+          ref: martini-5.4.309
+          fetch-depth: 1
+
+      - name: Prepare Compiler
+        run: |
+          mkdir -p compiler/clang-bin
+          cd compiler
+          curl -fL "https://github.com/Rancemxn/android_kernel_oppo_sm7325/releases/download/BuildTool/linux-x86-refs_heads_llvm-r383902b-clang-r383902.tar.gz" -o clang.tar.gz --connect-timeout 30 --retry 5 --retry-delay 5
+          tar -xzf clang.tar.gz -C clang-bin
+          rm -f clang.tar.gz
+          ls clang-bin/bin | head -5
+
+      - name: Handle Dependencies
+        run: |
+          mv temp_modules/vendor ./vendor
+          mv temp_modules/device ./device
+          rm -rf temp_modules
+          echo "vendor 文件数: $(find vendor -type f | wc -l)"
+          echo "device 文件数: $(find device -type f | wc -l)"
+
+      - name: Set Build Info
+        run: echo "BUILD_DATE=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
+
+      - name: Verify Source Tree
+        run: |
+          cd kernel/msm-5.4
+          echo "=== 版本 ==="
+          head -6 Makefile
+          echo "=== 9rt_defconfig ==="
+          ls -l arch/arm64/configs/9rt_defconfig
+          echo "=== KernelSU 子模块 ==="
+          ls -la KernelSU 2>&1 | head -5
+          echo "=== drivers/kernelsu 符号链接 ==="
+          ls -l drivers/kernelsu
+          echo "=== 解析检查 ==="
+          if [ -e drivers/kernelsu/Kconfig ]; then echo "OK: kernelsu/Kconfig 可访问"; else echo "WARN: kernelsu/Kconfig 不可访问"; fi
+
+      - name: Compile Kernel
+        run: |
+          export PATH="$(pwd)/compiler/clang-bin/bin:$PATH"
+          export CROSS_COMPILE="aarch64-linux-android-"
+          export CROSS_COMPILE_ARM32="arm-linux-androideabi-"
+          export CLANG_TRIPLE="aarch64-linux-gnu-"
+          export CLANG_PATH="$(pwd)/compiler/clang-bin/bin"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          cd kernel/msm-5.4
+          echo "=== 生成配置 ==="
+          make O=out CC="clang" LLVM=1 9rt_defconfig
+          echo "=== 关闭 KSU ==="
+          ./scripts/config --file out/.config -d CONFIG_KSU
+          ./scripts/config --file out/.config -d CONFIG_KSU_MANUAL_HOOK
+          ./scripts/config --file out/.config -d CONFIG_KSU_TRACEPOINT_HOOK
+          ./scripts/config --file out/.config -d CONFIG_KSU_SUSFS
+          echo "=== 启用额外功能 ==="
+          ./scripts/config --file out/.config -e CONFIG_USER_NS -e CONFIG_PID_NS -e CONFIG_IPC_NS -e CONFIG_CHECKPOINT_RESTORE -e CONFIG_SYSVIPC -e CONFIG_KPROBES -e CONFIG_TMPFS_POSIX_ACL -e CONFIG_TMPFS_XATTR
+          ./scripts/config --file out/.config -e CONFIG_CGROUP_PIDS -e CONFIG_CPUSETS -e CONFIG_MEMCG -e CONFIG_DEVTMPFS -e CONFIG_DEVTMPFS_MOUNT -e CONFIG_OVERLAY_FS
+          echo "=== KSU 确认 ==="
+          grep -E 'CONFIG_KSU' out/.config || echo "(无 KSU 配置 = 已关闭)"
+          echo "=== 编译 ==="
+          make O=out CC="clang" LLVM=1 -j$(nproc) 2>&1 | tail -60
+
+      - name: Check Result
+        run: |
+          ls -lh kernel/msm-5.4/out/arch/arm64/boot/Image || echo "Image 不存在"
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v6
+        with:
+          name: kernel-5.4.309-Image
+          path: kernel/msm-5.4/out/arch/arm64/boot/Image
+          if-no-files-found: warn
