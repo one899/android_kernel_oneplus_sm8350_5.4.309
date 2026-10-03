@@ -68,7 +68,8 @@ jobs:
             echo "  techpack/$d : $(find kernel/msm-5.4/techpack/$d -type f | wc -l) 个文件"
           done
           echo '=== 挂载 QCA WLAN 驱动 (qcacld-3.0) ==='
-          W=temp_modules/vendor/qcom/opensource/wlan
+          W=vendor/qcom/opensource/wlan
+          test -d "$W" && echo "  ✓ 驱动目录存在: $W" || { echo "  ✗ 不存在: $W"; ls -la vendor/qcom/opensource/ 2>&1; exit 1; }
           for d in qcacld-3.0 qca-wifi-host-cmn fw-api; do
             rm -rf "kernel/msm-5.4/drivers/staging/$d"
             cp -a "$W/$d" "kernel/msm-5.4/drivers/staging/$d"
