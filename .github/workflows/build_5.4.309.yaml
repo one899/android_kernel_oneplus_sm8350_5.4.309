@@ -28,7 +28,17 @@ jobs:
           path: kernel/msm-5.4
           ref: martini-5.4.309
           fetch-depth: 1
-          submodules: recursive
+
+      - name: Disable KSU (no submodule needed)
+        run: |
+          cd kernel/msm-5.4
+          echo "=== 关闭 KSU: 注释掉 drivers/Kconfig 的 source 行 ==="
+          grep -n 'kernelsu' drivers/Kconfig || true
+          sed -i 's|^source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"  # KSU disabled|' drivers/Kconfig
+          sed -i '/CONFIG_KSU.*kernelsu/d' drivers/Makefile
+          echo "=== 修改后 ==="
+          grep -n 'kernelsu\|KSU' drivers/Kconfig || echo "  (无引用)"
+          grep -n 'kernelsu' drivers/Makefile || echo "  (Makefile 也无引用)"
 
       - name: Checkout Modules Source
         uses: actions/checkout@v6
