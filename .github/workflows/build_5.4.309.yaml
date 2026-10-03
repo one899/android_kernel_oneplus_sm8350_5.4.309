@@ -126,13 +126,61 @@ jobs:
           echo "===================== make 退出码: $RC ====================="
           exit $RC
 
+      - name: Package AnyKernel3
+        run: |
+          set -e
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          cd AnyKernel3
+          rm -rf .git .github README.md
+          cp ../kernel/msm-5.4/out/arch/arm64/boot/Image .
+          mkdir -p modules/vendor/lib/modules
+          find ../kernel/msm-5.4/out -name '*.ko' -exec cp {} modules/vendor/lib/modules/ \; 2>/dev/null || true
+          echo ".ko 数量: $(find modules/vendor/lib/modules -name '*.ko' | wc -l)"
+          sed -i 's|^kernel.string=.*|kernel.string=Kernel 5.4.309 for OnePlus 9RT (martini) - KSU disabled|' anykernel.sh
+          sed -i 's|^device.name1=.*|device.name1=martini|' anykernel.sh
+          sed -i 's|^device.name2=.*|device.name2=OnePlus 9RT|' anykernel.sh
+          sed -i 's|^device.name3=.*|device.name3=|' anykernel.sh
+          sed -i 's|^block=.*|block=boot|' anykernel.sh
+          sed -i 's|^do.modules=.*|do.modules=1|' anykernel.sh
+          sed -i 's|^do.systemless=.*|do.systemless=0|' anykernel.sh
+          echo '=== anykernel.sh 关键项 ==='
+          grep -E 'kernel.string|device.name|^block=|do.modules|do.systemless' anykernel.sh
+          ls -la
+          zip -r9 ../AK3-9RT-Kernel-5.4.309-${BUILD_DATE}.zip * -x '.git*' README.md '*placeholder'
+          cd ..
+          ls -lh AK3-*.zip
+
+      - name: Pack Boot Image (no Magisk)
+        run: |
+          set -e
+          mkdir -p boot_pack && cd boot_pack
+          echo '=== 下载原厂 boot.img ==='
+          curl -fL 'https://github.com/one899/android_kernel_oneplus_sm8350_5.4.309/releases/download/stock-boot-martini/boot.img' -o boot_origin.img
+          ls -lh boot_origin.img
+          echo '=== magiskboot (仅作解包/重打包工具, 不注入 Magisk) ==='
+          wget -q https://raw.githubusercontent.com/miaizhe/magiskboot-linux/refs/heads/main/x86_64/magiskboot
+          chmod +x magiskboot
+          echo '=== 解包 ==='
+          ./magiskboot unpack boot_origin.img
+          ls -la
+          echo '=== 替换内核 ==='
+          rm -f kernel
+          cp ../kernel/msm-5.4/out/arch/arm64/boot/Image kernel
+          ls -l kernel
+          echo '=== 重打包 ==='
+          ./magiskboot repack boot_origin.img ../boot-9RT-Kernel-5.4.309-${BUILD_DATE}.img
+          cd ..
+          ls -lh boot-*.img
       - name: Check Result
         run: |
           ls -lh kernel/msm-5.4/out/arch/arm64/boot/Image || echo "Image 不存在"
 
-      - name: Upload Image
+      - name: Upload All Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: kernel-5.4.309-Image
-          path: kernel/msm-5.4/out/arch/arm64/boot/Image
+          name: 9RT-Kernel-5.4.309
+          path: |
+            kernel/msm-5.4/out/arch/arm64/boot/Image
+            AK3-9RT-Kernel-5.4.309-${BUILD_DATE}.zip
+            boot-9RT-Kernel-5.4.309-${BUILD_DATE}.img
           if-no-files-found: warn
