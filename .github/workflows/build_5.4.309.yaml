@@ -78,6 +78,11 @@ jobs:
           rm -rf temp_modules
           test -f kernel/msm-5.4/techpack/audio/Makefile && echo 'OK: techpack/audio/Makefile 存在' || { echo 'FAIL: techpack 缺失'; exit 1; }
           test -f kernel/msm-5.4/drivers/staging/qcacld-3.0/Kbuild && echo 'OK: qcacld-3.0/Kbuild 存在' || { echo 'FAIL: qcacld 缺失'; exit 1; }
+          echo '=== 修 qcacld Kbuild 的相对路径 (O=out 下会失效) ==='
+          KB=kernel/msm-5.4/drivers/staging/qcacld-3.0/Kbuild
+          echo '  改前:'; grep -n 'WLAN_ROOT :=' $KB | sed 's/^/    /'
+          sed -i 's|^\t*WLAN_ROOT := drivers/staging/qcacld-3.0|WLAN_ROOT := $(srctree)/drivers/staging/qcacld-3.0|' $KB
+          echo '  改后:'; grep -n 'WLAN_ROOT :=' $KB | sed 's/^/    /'
           echo '=== 接线 drivers/staging/{Kconfig,Makefile} ==='
           cd kernel/msm-5.4
           grep -q 'qcacld-3.0/Kconfig' drivers/staging/Kconfig || echo 'source "drivers/staging/qcacld-3.0/Kconfig"' >> drivers/staging/Kconfig
