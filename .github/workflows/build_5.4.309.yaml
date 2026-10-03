@@ -129,8 +129,10 @@ jobs:
           echo '===== 生成配置 ====='
           make O=out CC=clang LLVM=1 9rt_defconfig
           echo '===== 打开 QCA WLAN 驱动 ====='
-          ./scripts/config --file out/.config -e CONFIG_QCA_CLD_WLAN
+          ./scripts/config --file out/.config -m CONFIG_QCA_CLD_WLAN
           ./scripts/config --file out/.config --set-str CONFIG_QCA_CLD_WLAN_PROFILE default
+          echo '--- WLAN 配置确认 ---'
+          grep 'CONFIG_QCA_CLD_WLAN' out/.config | head -3
           echo '===== 关闭 KSU ====='
           ./scripts/config --file out/.config -d CONFIG_KSU
           ./scripts/config --file out/.config -d CONFIG_KSU_MANUAL_HOOK
