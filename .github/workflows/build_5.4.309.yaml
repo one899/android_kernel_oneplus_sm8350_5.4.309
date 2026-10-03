@@ -67,8 +67,23 @@ jobs:
             cp -a "temp_modules/kernel/msm-5.4/techpack/$d" "kernel/msm-5.4/techpack/$d"
             echo "  techpack/$d : $(find kernel/msm-5.4/techpack/$d -type f | wc -l) 个文件"
           done
+          echo '=== 挂载 QCA WLAN 驱动 (qcacld-3.0) ==='
+          W=temp_modules/vendor/qcom/opensource/wlan
+          for d in qcacld-3.0 qca-wifi-host-cmn fw-api; do
+            rm -rf "kernel/msm-5.4/drivers/staging/$d"
+            cp -a "$W/$d" "kernel/msm-5.4/drivers/staging/$d"
+            echo "  drivers/staging/$d : $(find kernel/msm-5.4/drivers/staging/$d -type f | wc -l) 个文件"
+          done
           rm -rf temp_modules
           test -f kernel/msm-5.4/techpack/audio/Makefile && echo 'OK: techpack/audio/Makefile 存在' || { echo 'FAIL: techpack 缺失'; exit 1; }
+          test -f kernel/msm-5.4/drivers/staging/qcacld-3.0/Kbuild && echo 'OK: qcacld-3.0/Kbuild 存在' || { echo 'FAIL: qcacld 缺失'; exit 1; }
+          echo '=== 接线 drivers/staging/{Kconfig,Makefile} ==='
+          cd kernel/msm-5.4
+          grep -q 'qcacld-3.0/Kconfig' drivers/staging/Kconfig || echo 'source "drivers/staging/qcacld-3.0/Kconfig"' >> drivers/staging/Kconfig
+          grep -q 'qcacld-3.0/' drivers/staging/Makefile || echo 'obj-$(CONFIG_QCA_CLD_WLAN) += qcacld-3.0/' >> drivers/staging/Makefile
+          tail -2 drivers/staging/Kconfig | sed 's/^/  Kconfig: /'
+          tail -2 drivers/staging/Makefile | sed 's/^/  Makefile: /'
+          cd ../..
 
       - name: Set Release Info
         run: echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
@@ -107,6 +122,9 @@ jobs:
           sed -i 's/obj-$(CONFIG_KPROBES)/obj-y/g' kernel/Makefile || true
           echo '===== 生成配置 ====='
           make O=out CC=clang LLVM=1 9rt_defconfig
+          echo '===== 打开 QCA WLAN 驱动 ====='
+          ./scripts/config --file out/.config -e CONFIG_QCA_CLD_WLAN
+          ./scripts/config --file out/.config --set-str CONFIG_QCA_CLD_WLAN_PROFILE default
           echo '===== 关闭 KSU ====='
           ./scripts/config --file out/.config -d CONFIG_KSU
           ./scripts/config --file out/.config -d CONFIG_KSU_MANUAL_HOOK
@@ -118,7 +136,7 @@ jobs:
           echo '===== KSU 确认 ====='
           grep -E 'CONFIG_KSU' out/.config || echo '(无 KSU 配置 = 已关闭)'
           echo '===== 编译 ====='
-          make O=out CC=clang LLVM=1 -j$(nproc) 2>&1 | tee /tmp/build.log | tail -80
+          make O=out CC=clang LLVM=1 -j$(nproc) 2>&1 | tee /tmp/build.log
           RC=${PIPESTATUS[0]}
           echo "===================== make 退出码: $RC ====================="
           exit $RC
@@ -161,10 +179,28 @@ jobs:
           cd ..
           ls -lh boot-*.img
 
+      - name: Collect wlan.ko
+        run: |
+          set -e
+          echo '=== 找 wlan.ko ==='
+          find kernel/msm-5.4/out -name 'wlan.ko' -o -name '*wlan*.ko' | head -20
+          WK=$(find kernel/msm-5.4/out -name 'wlan.ko' | head -1)
+          if [ -z "$WK" ]; then
+            echo 'FAIL: 没找到 wlan.ko'
+            echo '--- out 里所有 .ko ---'
+            find kernel/msm-5.4/out -name '*.ko' | head -30
+            exit 1
+          fi
+          echo "找到: $WK"
+          cp "$WK" qca_cld3_wlan.ko
+          ls -lh qca_cld3_wlan.ko
+          echo '=== vermagic 检查 ==='
+          strings qca_cld3_wlan.ko | grep -m1 vermagic
+
       - name: Check Result
         run: |
           ls -lh kernel/msm-5.4/out/arch/arm64/boot/Image
-          ls -lh AK3-*.zip boot-*.img
+          ls -lh AK3-*.zip boot-*.img qca_cld3_wlan.ko
 
       - name: Upload All Artifacts
         uses: actions/upload-artifact@v6
@@ -174,4 +210,5 @@ jobs:
             kernel/msm-5.4/out/arch/arm64/boot/Image
             AK3-9RT-Kernel-5.4.309-Docker.zip
             boot-9RT-Kernel-5.4.309-Docker.img
+            qca_cld3_wlan.ko
           if-no-files-found: warn
