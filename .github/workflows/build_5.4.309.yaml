@@ -130,9 +130,12 @@ jobs:
           make O=out CC=clang LLVM=1 9rt_defconfig
           echo '===== 打开 QCA WLAN 驱动 ====='
           ./scripts/config --file out/.config -m CONFIG_QCA_CLD_WLAN
-          ./scripts/config --file out/.config --set-str CONFIG_QCA_CLD_WLAN_PROFILE default
+          ./scripts/config --file out/.config --set-str CONFIG_QCA_CLD_WLAN_PROFILE qca6390
           echo '--- WLAN 配置确认 ---'
           grep 'CONFIG_QCA_CLD_WLAN' out/.config | head -3
+          echo '--- profile 配置文件确认 ---'
+          ls -la drivers/staging/qcacld-3.0/configs/qca6390_defconfig
+          grep -m3 'CNSS_QCA6390\|WLAN_FEATURE_TWT\|WLAN_FEATURE_11AX' drivers/staging/qcacld-3.0/configs/qca6390_defconfig | sed 's/^/    /'
           echo '===== 关闭 KSU ====='
           ./scripts/config --file out/.config -d CONFIG_KSU
           ./scripts/config --file out/.config -d CONFIG_KSU_MANUAL_HOOK
