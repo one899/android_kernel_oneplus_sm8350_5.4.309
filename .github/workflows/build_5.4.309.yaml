@@ -146,7 +146,7 @@ jobs:
           echo '=== anykernel.sh 关键项 ==='
           grep -E 'kernel.string|device.name|^block=|do.modules|do.systemless' anykernel.sh
           ls -la
-          zip -r9 ../AK3-9RT-Kernel-5.4.309-${BUILD_DATE}.zip * -x '.git*' README.md '*placeholder'
+          zip -r9 ../AK3-9RT-Kernel-5.4.309.zip * -x '.git*' README.md '*placeholder'
           cd ..
           ls -lh AK3-*.zip
 
@@ -168,7 +168,7 @@ jobs:
           cp ../kernel/msm-5.4/out/arch/arm64/boot/Image kernel
           ls -l kernel
           echo '=== 重打包 ==='
-          ./magiskboot repack boot_origin.img ../boot-9RT-Kernel-5.4.309-${BUILD_DATE}.img
+          ./magiskboot repack boot_origin.img ../boot-9RT-Kernel-5.4.309.img
           cd ..
           ls -lh boot-*.img
       - name: Check Result
@@ -181,6 +181,6 @@ jobs:
           name: 9RT-Kernel-5.4.309
           path: |
             kernel/msm-5.4/out/arch/arm64/boot/Image
-            AK3-9RT-Kernel-5.4.309-${BUILD_DATE}.zip
-            boot-9RT-Kernel-5.4.309-${BUILD_DATE}.img
+            AK3-9RT-Kernel-5.4.309.zip
+            boot-9RT-Kernel-5.4.309.img
           if-no-files-found: warn
