@@ -1,4 +1,4 @@
-name: Build Kernel 5.4.309 (KSU Disabled)
+name: Build 9RT Kernel 5.4.309 (Docker, KSU disabled)
 
 on:
   workflow_dispatch:
@@ -29,16 +29,15 @@ jobs:
           ref: martini-5.4.309
           fetch-depth: 1
 
-      - name: Disable KSU (no submodule needed)
+      - name: Disable KSU (comment out Kconfig source)
         run: |
           cd kernel/msm-5.4
-          echo "=== 关闭 KSU: 注释掉 drivers/Kconfig 的 source 行 ==="
-          grep -n 'kernelsu' drivers/Kconfig || true
+          echo '=== 改动前 ==='
+          grep -n 'kernelsu' drivers/Kconfig drivers/Makefile || true
           sed -i 's|^source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"  # KSU disabled|' drivers/Kconfig
           sed -i '/CONFIG_KSU.*kernelsu/d' drivers/Makefile
-          echo "=== 修改后 ==="
-          grep -n 'kernelsu\|KSU' drivers/Kconfig || echo "  (无引用)"
-          grep -n 'kernelsu' drivers/Makefile || echo "  (Makefile 也无引用)"
+          echo '=== 改动后 ==='
+          grep -n 'kernelsu' drivers/Kconfig drivers/Makefile || echo '  (已无引用)'
 
       - name: Checkout Modules Source
         uses: actions/checkout@v6
@@ -52,53 +51,41 @@ jobs:
         run: |
           mkdir -p compiler/clang-bin
           cd compiler
-          curl -fL "https://github.com/Rancemxn/android_kernel_oppo_sm7325/releases/download/BuildTool/linux-x86-refs_heads_llvm-r383902b-clang-r383902.tar.gz" -o clang.tar.gz --connect-timeout 30 --retry 5 --retry-delay 5
-          tar -xzf clang.tar.gz -C clang-bin
-          rm -f clang.tar.gz
-          ls clang-bin/bin | head -5
+          curl -fL 'https://github.com/Rancemxn/android_kernel_oppo_sm7325/releases/download/BuildTool/linux-x86-refs_heads_llvm-r383902b-clang-r383902.tar.gz' -o clang-r383902.tar.gz --connect-timeout 30 --retry 5 --retry-delay 5
+          tar -xzf clang-r383902.tar.gz -C clang-bin
+          rm -f clang-r383902.tar.gz
+          ls clang-bin/bin | head -3
 
       - name: Handle Dependencies
         run: |
+          set -e
           mv temp_modules/vendor ./vendor
           mv temp_modules/device ./device
-          echo "=== 补齐 techpack (内核仓库里是空的 gitlink) ==="
+          echo '=== 补齐 techpack (内核仓库里是空的 gitlink) ==='
           for d in audio camera dataipa display video; do
             rm -rf "kernel/msm-5.4/techpack/$d"
             cp -a "temp_modules/kernel/msm-5.4/techpack/$d" "kernel/msm-5.4/techpack/$d"
             echo "  techpack/$d : $(find kernel/msm-5.4/techpack/$d -type f | wc -l) 个文件"
           done
           rm -rf temp_modules
-          echo "=== 检查 ==="
-          ls -la kernel/msm-5.4/techpack/
-          if [ -f kernel/msm-5.4/techpack/audio/Makefile ]; then
-            echo "OK: techpack/audio/Makefile 存在"
-          else
-            echo "FAIL: techpack/audio/Makefile 不存在"
-            exit 1
-          fi
-          echo "vendor   : $(find vendor -type f | wc -l) 个文件"
-          echo "device   : $(find device -type f | wc -l) 个文件"
-          echo "techpack : $(find kernel/msm-5.4/techpack -type f | wc -l) 个文件"
+          test -f kernel/msm-5.4/techpack/audio/Makefile && echo 'OK: techpack/audio/Makefile 存在' || { echo 'FAIL: techpack 缺失'; exit 1; }
 
-      - name: Set Build Info
-        run: echo "BUILD_DATE=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
+      - name: Set Release Info
+        run: echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
 
-      - name: Verify Source Tree
+      - name: rekernel
         run: |
           cd kernel/msm-5.4
-          echo "=== 版本 ==="
-          head -6 Makefile
-          echo "=== 9rt_defconfig ==="
-          ls -l arch/arm64/configs/9rt_defconfig
-          echo "=== KernelSU 子模块 ==="
-          ls -la KernelSU 2>&1 | head -5
-          echo "=== drivers/kernelsu 符号链接 ==="
-          ls -l drivers/kernelsu
-          echo "=== 解析检查 ==="
-          if [ -e drivers/kernelsu/Kconfig ]; then echo "OK: kernelsu/Kconfig 可访问"; else echo "WARN: kernelsu/Kconfig 不可访问"; fi
+          curl -LSs 'https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/refs/heads/mainline/Patches/Rekernel/rekernel_patches.sh' -o rekernel_patches.sh
+          chmod +x rekernel_patches.sh
+          bash rekernel_patches.sh || echo 'rekernel_patches 有非致命错误, 继续'
+          mkdir -p drivers/rekernel
+          curl -LSs 'https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/refs/heads/mainline/Patches/Rekernel/rekernel_extra.patch' -o rekernel_extra.patch
+          patch -p1 < rekernel_extra.patch || true
 
       - name: Compile Kernel
         run: |
+          set -o pipefail
           export PATH="$(pwd)/compiler/clang-bin/bin:$PATH"
           export CROSS_COMPILE="aarch64-linux-android-"
           export CROSS_COMPILE_ARM32="arm-linux-androideabi-"
@@ -107,26 +94,36 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           cd kernel/msm-5.4
-          echo "=== 生成配置 ==="
-          make O=out CC="clang" LLVM=1 9rt_defconfig
-          echo "=== 关闭 KSU ==="
+          echo '===== 添加 docker 补丁 ====='
+          rm -f fs/overlayfs/util.c
+          curl -LSs 'https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/util.c' -o fs/overlayfs/util.c
+          rm -f kernel/module.c
+          curl -LSs 'https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/module.c' -o kernel/module.c
+          rm -f include/linux/sched/user.h
+          curl -LSs 'https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_3_4_5.patch' -o 001.GKI-below-6.12-fix_sysvipc_kabi_3_4_5.patch
+          curl -LSs 'https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/user.h' -o include/linux/sched/user.h
+          patch -p1 < 001.GKI-below-6.12-fix_sysvipc_kabi_3_4_5.patch || echo 'sysvipc 补丁有非致命错误'
+          echo '===== docker 补丁完成 ====='
+          sed -i 's/obj-$(CONFIG_KPROBES)/obj-y/g' kernel/Makefile || true
+          echo '===== 生成配置 ====='
+          make O=out CC=clang LLVM=1 9rt_defconfig
+          echo '===== 关闭 KSU ====='
           ./scripts/config --file out/.config -d CONFIG_KSU
           ./scripts/config --file out/.config -d CONFIG_KSU_MANUAL_HOOK
           ./scripts/config --file out/.config -d CONFIG_KSU_TRACEPOINT_HOOK
           ./scripts/config --file out/.config -d CONFIG_KSU_SUSFS
-          echo "=== 启用额外功能 ==="
+          echo '===== Droidspaces / Docker 所需 (来自原流程) ====='
           ./scripts/config --file out/.config -e CONFIG_USER_NS -e CONFIG_PID_NS -e CONFIG_IPC_NS -e CONFIG_CHECKPOINT_RESTORE -e CONFIG_SYSVIPC -e CONFIG_KPROBES -e CONFIG_TMPFS_POSIX_ACL -e CONFIG_TMPFS_XATTR
-          ./scripts/config --file out/.config -e CONFIG_CGROUP_PIDS -e CONFIG_CPUSETS -e CONFIG_MEMCG -e CONFIG_DEVTMPFS -e CONFIG_DEVTMPFS_MOUNT -e CONFIG_OVERLAY_FS
-          echo "=== KSU 确认 ==="
-          grep -E 'CONFIG_KSU' out/.config || echo "(无 KSU 配置 = 已关闭)"
-          echo "=== 编译 ==="
-          set -o pipefail
-          make O=out CC="clang" LLVM=1 -j$(nproc) 2>&1 | tee /tmp/build.log | tail -80
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_PIDS --enable CONFIG_CGROUP_IO --enable CONFIG_CPUSETS --enable CONFIG_MEMCG --enable CONFIG_DEVTMPFS --enable CONFIG_DEVTMPFS_MOUNT --enable CONFIG_OVERLAY_FS
+          echo '===== KSU 确认 ====='
+          grep -E 'CONFIG_KSU' out/.config || echo '(无 KSU 配置 = 已关闭)'
+          echo '===== 编译 ====='
+          make O=out CC=clang LLVM=1 -j$(nproc) 2>&1 | tee /tmp/build.log | tail -80
           RC=${PIPESTATUS[0]}
           echo "===================== make 退出码: $RC ====================="
           exit $RC
 
-      - name: Package AnyKernel3
+      - name: Package with AnyKernel3
         run: |
           set -e
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
@@ -136,17 +133,14 @@ jobs:
           mkdir -p modules/vendor/lib/modules
           find ../kernel/msm-5.4/out -name '*.ko' -exec cp {} modules/vendor/lib/modules/ \; 2>/dev/null || true
           echo ".ko 数量: $(find modules/vendor/lib/modules -name '*.ko' | wc -l)"
-          sed -i 's|^kernel.string=.*|kernel.string=Kernel 5.4.309 for OnePlus 9RT (martini) - KSU disabled|' anykernel.sh
+          sed -i 's|^kernel.string=.*|kernel.string=Kernel 5.4.309 Docker for OnePlus 9RT (KSU disabled)|' anykernel.sh
           sed -i 's|^device.name1=.*|device.name1=martini|' anykernel.sh
           sed -i 's|^device.name2=.*|device.name2=OnePlus 9RT|' anykernel.sh
-          sed -i 's|^device.name3=.*|device.name3=|' anykernel.sh
           sed -i 's|^block=.*|block=boot|' anykernel.sh
           sed -i 's|^do.modules=.*|do.modules=1|' anykernel.sh
           sed -i 's|^do.systemless=.*|do.systemless=0|' anykernel.sh
-          echo '=== anykernel.sh 关键项 ==='
           grep -E 'kernel.string|device.name|^block=|do.modules|do.systemless' anykernel.sh
-          ls -la
-          zip -r9 ../AK3-9RT-Kernel-5.4.309.zip * -x '.git*' README.md '*placeholder'
+          zip -r9 ../AK3-9RT-Kernel-5.4.309-Docker.zip * -x '.git*' README.md '*placeholder'
           cd ..
           ls -lh AK3-*.zip
 
@@ -154,33 +148,30 @@ jobs:
         run: |
           set -e
           mkdir -p boot_pack && cd boot_pack
-          echo '=== 下载原厂 boot.img ==='
+          echo '=== 原厂 boot.img ==='
           curl -fL 'https://github.com/one899/android_kernel_oneplus_sm8350_5.4.309/releases/download/stock-boot-martini/boot.img' -o boot_origin.img
           ls -lh boot_origin.img
-          echo '=== magiskboot (仅作解包/重打包工具, 不注入 Magisk) ==='
           wget -q https://raw.githubusercontent.com/miaizhe/magiskboot-linux/refs/heads/main/x86_64/magiskboot
           chmod +x magiskboot
-          echo '=== 解包 ==='
           ./magiskboot unpack boot_origin.img
           ls -la
-          echo '=== 替换内核 ==='
           rm -f kernel
           cp ../kernel/msm-5.4/out/arch/arm64/boot/Image kernel
-          ls -l kernel
-          echo '=== 重打包 ==='
-          ./magiskboot repack boot_origin.img ../boot-9RT-Kernel-5.4.309.img
+          ./magiskboot repack boot_origin.img ../boot-9RT-Kernel-5.4.309-Docker.img
           cd ..
           ls -lh boot-*.img
+
       - name: Check Result
         run: |
-          ls -lh kernel/msm-5.4/out/arch/arm64/boot/Image || echo "Image 不存在"
+          ls -lh kernel/msm-5.4/out/arch/arm64/boot/Image
+          ls -lh AK3-*.zip boot-*.img
 
       - name: Upload All Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: 9RT-Kernel-5.4.309
+          name: 9RT-Kernel-5.4.309-Docker
           path: |
             kernel/msm-5.4/out/arch/arm64/boot/Image
-            AK3-9RT-Kernel-5.4.309.zip
-            boot-9RT-Kernel-5.4.309.img
+            AK3-9RT-Kernel-5.4.309-Docker.zip
+            boot-9RT-Kernel-5.4.309-Docker.img
           if-no-files-found: warn
