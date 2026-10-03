@@ -61,9 +61,21 @@ jobs:
         run: |
           mv temp_modules/vendor ./vendor
           mv temp_modules/device ./device
+          echo "=== 补齐 techpack (内核仓库里是空的 gitlink) ==="
+          ls -la kernel/msm-5.4/techpack/ || true
+          for d in audio camera dataipa display video; do
+            echo "--- techpack/$d"
+            rm -rf "kernel/msm-5.4/techpack/$d"
+            cp -a "temp_modules/kernel/msm-5.4/techpack/$d" "kernel/msm-5.4/techpack/$d"
+            echo "    $(find kernel/msm-5.4/techpack/$d -type f | wc -l) 个文件"
+          done
           rm -rf temp_modules
+          echo "=== 检查 ==="
+          ls -la kernel/msm-5.4/techpack/
+          test -f kernel/msm-5.4/techpack/audio/Makefile && echo "OK: techpack/audio/Makefile 存在" || { echo "FAIL: techpack/audio/Makefile 不存在"; exit 1; }
           echo "vendor 文件数: $(find vendor -type f | wc -l)"
           echo "device 文件数: $(find device -type f | wc -l)"
+          echo "techpack 文件数: $(find kernel/msm-5.4/techpack -type f | wc -l)"
 
       - name: Set Build Info
         run: echo "BUILD_DATE=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
@@ -84,6 +96,7 @@ jobs:
 
       - name: Compile Kernel
         run: |
+          set -o pipefail
           export PATH="$(pwd)/compiler/clang-bin/bin:$PATH"
           export CROSS_COMPILE="aarch64-linux-android-"
           export CROSS_COMPILE_ARM32="arm-linux-androideabi-"
@@ -105,7 +118,9 @@ jobs:
           echo "=== KSU 确认 ==="
           grep -E 'CONFIG_KSU' out/.config || echo "(无 KSU 配置 = 已关闭)"
           echo "=== 编译 ==="
-          make O=out CC="clang" LLVM=1 -j$(nproc) 2>&1 | tail -60
+          make O=out CC="clang" LLVM=1 -j$(nproc) 2>&1 | tee /tmp/build.log | tail -80
+echo "make 退出码: ${PIPESTATUS[0]}"
+exit ${PIPESTATUS[0]}
 
       - name: Check Result
         run: |
